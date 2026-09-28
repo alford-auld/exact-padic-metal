@@ -86,6 +86,10 @@ class Result:
     reason: str
     levels: List[LevelStat] = field(default_factory=list)
     kernel_commit: str = ""
+    #: One common zero modulo ``2^e_max``, if the level was ever reached.
+    #: ``e_max = 0`` makes this the zero vector, which is a zero modulo
+    #: ``2^0 = 1`` vacuously -- check ``e_max`` before using it.
+    witness: List[int] | None = None
 
     @property
     def exact(self) -> bool:
@@ -306,7 +310,10 @@ def solve(
             guarantee = "lower_bound" if truncated_ever else "exact"
             if truncated_ever:
                 reason += " (after discarding survivors at the cap)"
-            return Result(e, guarantee, reason, levels, _yates.kernel_commit())
+            # Z, not W: the survivors of the *previous* level are the zeros
+            # modulo 2^e_max that this result is about.
+            return Result(e, guarantee, reason, levels, _yates.kernel_commit(),
+                          witness=[int(v) for v in Z[0]])
 
         e += 1
         Z = W
@@ -317,4 +324,5 @@ def solve(
                 f"level bound max_e = {max_e} reached with {Z.shape[0]} zeros remaining",
                 levels,
                 _yates.kernel_commit(),
+                witness=[int(v) for v in Z[0]],
             )

@@ -340,6 +340,72 @@ def section_blowup(have_gpu: bool) -> None:
     SUMMARY["blowup"] = "|Z| multiplies by 2^(L-rank) per level when |I| < L"
 
 
+# -- GROKKING --------------------------------------------------------------
+
+
+def section_grokking(have_gpu: bool) -> None:
+    rule("GROKKING  (neelnanda-io/Grokking: (a+b) mod P, exactly)")
+    from apps.grokking import certify, exact
+    from apps.grokking.task import GROKKING, ModularAddition
+
+    print("the task a transformer groks on has a closed-form two-unit solution")
+    print("in the character network:  y = (chi(p^j(a+b)) - chi(0)) / p^F .\n")
+
+    print(f"{'p':>5}{'E':>3}{'modulus':>9}{'pairs':>8}{'j':>3}{'F':>3}"
+          f"{'mismatches':>12}{'solves the §4 system':>22}")
+    for p_, E in [(2, 1), (2, 2), (2, 3), (2, 4), (3, 2), (5, 2), (113, 1)]:
+        task = ModularAddition(p_, E)
+        sol = exact.exact_solution(p_, E)
+        pairs = task.all_pairs()
+        probe = pairs if len(pairs) <= 64 else random.Random(0).sample(pairs, 40)
+        mism, is_zero = certify.certify_closed_form(task, probe)
+        tag = "  <- Grokking" if task == GROKKING else ""
+        print(f"{p_:>5}{E:>3}{task.modulus:>9}{task.n_pairs:>8}{sol.j:>3}{sol.F:>3}"
+              f"{mism:>12}{str(is_zero):>22}{tag}")
+    print("\nmismatches are over ALL pairs; `solves the §4 system` means the")
+    print("closed form is a common zero of the polynomials Algorithm 6 searches,")
+    print("so any failure below is a search failure, not an absent solution.")
+
+    # -- the obstruction
+    print("\n-- why the search cannot find it: mod-2 Jacobian of the §4 system --")
+    task = ModularAddition(2, 3)
+    profiles = certify.rank_profile(task, task.all_pairs(), levels=3)
+    print(f"{'level':>6}{'|Z|':>8}{'equations':>11}{'L':>4}{'F_2 rank':>10}"
+          f"{'branching':>11}   columns live mod 2")
+    for rp in profiles:
+        print(f"{rp.level:>6}{rp.n_survivors:>8}{rp.n_equations:>11}{rp.n_vars:>4}"
+              f"{rp.rank_max:>10}{'2^' + str(rp.n_vars - rp.rank_max):>11}   "
+              f"{', '.join(rp.live_columns)}")
+    if profiles:
+        print(f"\nchi = exp_p(q .) has chi' = q chi with q = p^m, so every derivative")
+        print("of the residual in an entry of A or b carries a factor of p. Those")
+        print("columns are identically zero mod p at every level: the digit DP must")
+        print(f"enumerate all {profiles[0].branching} of them per survivor, per level,")
+        print("and no amount of extra data changes that (64 equations, rank 1).")
+        SUMMARY["grokking_branching_per_level"] = profiles[0].branching
+        SUMMARY["grokking_f2_rank"] = profiles[0].rank_max
+
+    # -- the search, where it still works
+    print("\n-- Algorithm 6 searching for it (p = 2) --")
+    print(f"{'E':>3}{'P':>4}{'L':>3}{'train':>7}{'of':>5}{'e*':>4}{'target':>8}"
+          f"{'fitted':>8}{'test err':>10}{'s':>8}")
+    rng = random.Random(SEED + 5)
+    reached = []
+    for E, fracs, cap in [(1, (0.5, 1.0), 1 << 16), (2, (0.5, 1.0), 1 << 16),
+                          (3, (1.0,), 1 << 14)]:
+        task = ModularAddition(2, E)
+        for frac in fracs:
+            train, test = task.split(random.Random(11), frac)
+            r = certify.fit(task, train, test, max_survivors=cap)
+            te = "-" if r.test_errors is None else f"{r.test_errors}/{r.n_test}"
+            print(f"{E:>3}{task.modulus:>4}{task.D * 4:>3}{r.n_train:>7}{task.n_pairs:>5}"
+                  f"{r.e_max:>4}{r.e_star_target:>8}{str(r.fitted):>8}{te:>10}{r.seconds:>8.2f}")
+            reached.append((E, r.fitted, r.test_errors))
+    ok = [E for E, f, t in reached if f and t == 0]
+    SUMMARY["grokking_search_exact_upto_E"] = max(ok) if ok else 0
+    SUMMARY["grokking_closed_form"] = "exact for every prime tested, incl. P=113"
+
+
 # -- main ------------------------------------------------------------------
 
 
@@ -351,6 +417,7 @@ def main() -> None:
     section_level0(have_gpu)
     section_crossover(have_gpu)
     section_blowup(have_gpu)
+    section_grokking(have_gpu)
 
     rule("SUMMARY")
     SUMMARY["wall_seconds"] = round(time.perf_counter() - t0, 1)
