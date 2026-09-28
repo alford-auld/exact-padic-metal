@@ -1,4 +1,0 @@
-[submodule "vendor/exact-yates-metal"]
-	path = vendor/exact-yates-metal
-	url = git@github-personal:alford-auld/exact-yates-metal.git
-	branch = main

@@ -1,9 +1,13 @@
 """Locate and import the Yates butterfly kernel.
 
-The kernel lives in ``vendor/exact-yates-metal``, a git submodule pinned to the
-commit the measurements in this repository were taken with.  It ships no
-``pyproject.toml``, so it is imported by path rather than installed.
-``PADIC_YATES_PATH`` overrides the location.
+The kernel is vendored at ``vendor/yates`` -- a verbatim copy of the ``yates``
+package from *exact-yates-metal*, pinned by ``vendor/KERNEL_COMMIT``.  It is
+copied in rather than referenced as a submodule because every run executes an
+immutable source snapshot of the recorded commit, and those snapshots do not
+carry submodule contents.  See ``vendor/PROVENANCE.md``.
+
+``PADIC_YATES_PATH`` points at a directory *containing* a ``yates`` package,
+for developing against an upstream checkout instead.
 """
 
 from __future__ import annotations
@@ -12,18 +16,23 @@ import os
 import sys
 from pathlib import Path
 
-_DEFAULT = Path(__file__).resolve().parent.parent / "vendor" / "exact-yates-metal"
+_ROOT = Path(__file__).resolve().parent.parent
+_VENDOR = _ROOT / "vendor"
 
 
 def yates_root() -> Path:
-    root = Path(os.environ.get("PADIC_YATES_PATH", _DEFAULT))
-    if not (root / "yates" / "__init__.py").is_file():
-        raise ImportError(
-            f"the Yates kernel is not at {root}.\n"
-            "Run `git submodule update --init` in the repository root, or set "
-            "PADIC_YATES_PATH to a checkout of exact-yates-metal."
-        )
-    return root
+    """Directory to put on ``sys.path`` so that ``import yates`` works."""
+    override = os.environ.get("PADIC_YATES_PATH")
+    candidates = [Path(override)] if override else []
+    candidates.append(_VENDOR)
+    for root in candidates:
+        if (root / "yates" / "__init__.py").is_file():
+            return root
+    raise ImportError(
+        f"no `yates` package found in {[str(c) for c in candidates]}.\n"
+        "The kernel should be vendored at vendor/yates; see vendor/PROVENANCE.md, "
+        "or set PADIC_YATES_PATH to a directory containing a `yates` package."
+    )
 
 
 def load():
@@ -37,17 +46,8 @@ def load():
 
 
 def kernel_commit() -> str:
-    """The submodule commit, for provenance in run logs."""
-    head = yates_root() / ".git"
+    """The upstream commit the vendored copy was taken from."""
     try:
-        if head.is_file():  # submodule: a gitdir pointer
-            gitdir = Path(head.read_text().split("gitdir:", 1)[1].strip())
-            if not gitdir.is_absolute():
-                gitdir = (yates_root() / gitdir).resolve()
-            head = gitdir
-        ref = (head / "HEAD").read_text().strip()
-        if ref.startswith("ref:"):
-            ref = (head / ref.split(" ", 1)[1]).read_text().strip()
-        return ref[:12]
-    except Exception:
+        return (_VENDOR / "KERNEL_COMMIT").read_text().strip()[:12]
+    except OSError:
         return "unknown"

@@ -3,7 +3,7 @@
 Algorithm 6 of T. Mihara, *p-adic Character Neural Network*
 ([arXiv:2603.29905v1](https://arxiv.org/abs/2603.29905), math.NT, 31 Mar 2026),
 implemented at `p = 2` on the Metal Yates butterfly kernel from
-[`exact-yates-metal`](vendor/exact-yates-metal) — plus the §4 reduction that
+[`exact-yates-metal`](vendor/PROVENANCE.md), vendored at `vendor/yates` — plus the §4 reduction that
 produces its input from an actual 2-adic character network.
 
 ## Why a subset-lattice transform belongs here
@@ -148,6 +148,7 @@ padic/network.py     the §4 reduction, and instance generators
 bench/run.py         the run command: validate, then measure
 docs/exactness.md    what a reported e_max means
 docs/deviations.md   three faults in the printed pseudocode, and the fixes
+vendor/yates/        the Metal kernel, vendored (see vendor/PROVENANCE.md)
 ```
 
 Three deviations from the paper are documented and tested — Algorithm 5 as
@@ -158,7 +159,6 @@ answer depends on, and §4's `|p|^(e_max - 1)` needs a reading. See
 ## Running it
 
 ```sh
-git submodule update --init          # the Metal kernel
 uv sync
 uv run --locked python -m pytest     # 116 tests
 uv run --locked python -m bench.run  # the full run, ~80 s on an M4
