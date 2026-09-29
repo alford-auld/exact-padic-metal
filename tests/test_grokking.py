@@ -78,6 +78,39 @@ def test_A_and_b_are_invisible_modulo_p():
         assert rp.branching == 2 ** (rp.n_vars - 1)
 
 
+@pytest.mark.parametrize("N,M,D,nI", [
+    (1, 1, 1, 8), (1, 1, 4, 8), (2, 1, 2, 16), (2, 1, 2, 64), (2, 1, 3, 64),
+    (4, 1, 3, 128), (1, 2, 2, 16), (2, 2, 2, 64), (3, 2, 2, 64),
+    (2, 3, 3, 64), (3, 4, 2, 64),
+])
+def test_plain_jacobian_rank_equals_M_exactly(N, M, D, nI):
+    """rank_{F_p} J = M, independent of D, N and the sample count.
+
+    chi lands in 1 + q Z_p, so every entry of every live C' column is 1 mod p
+    and each output row contributes rank exactly one; A and b columns vanish.
+    This is the bound the README states, so it is checked rather than quoted.
+    """
+    from padic.network import planted_instance
+    from apps.grokking.certify import _f2_rank
+
+    inst, z_star = planted_instance(random.Random(11), n_samples=nI,
+                                    N=N, M=M, D=D, E=3, F=2)
+    polys = inst.to_polynomial_system()
+    L, names = inst.n_vars, inst.variable_names()
+    for t in (1, 2, 3):
+        z = [v % (1 << t) for v in z_star]
+        base = [f.eval_int(z) for f in polys]
+        cols = []
+        for l in range(L):
+            zz = list(z)
+            zz[l] += 1 << t
+            cols.append([((f.eval_int(zz) - b) >> t) & 1
+                         for f, b in zip(polys, base)])
+        assert _f2_rank([list(r) for r in zip(*cols)]) == M, f"t={t}"
+        live = {names[l] for l in range(L) if any(cols[l])}
+        assert all(n.startswith("C'") for n in live), f"t={t}: {live}"
+
+
 def test_grokking_constant_is_the_reference_task():
     assert GROKKING.p == 113 and GROKKING.E == 1
     assert GROKKING.modulus == 113

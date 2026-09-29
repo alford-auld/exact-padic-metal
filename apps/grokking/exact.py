@@ -18,17 +18,20 @@ is a group homomorphism ``Z_p -> Q_p^x``, and its Taylor series is
 
     chi(v) = 1 + q v + q^2 v^2 / 2! + ...
 
-Feed it ``v = p^j u``.  The term of index ``e`` is ``q^e p^{je} u^e / e!``, of
-valuation at least ``(j + m) e - v_p(e!) >= (j + m) e - (e-1)/(p-1)``, so
+Feed it ``v = p^j u``.  By Legendre's formula the term of index ``e`` has
+valuation at least ``(j + m) e - (e - s_p(e))/(p-1)``.  The binding term is
+``e = 2``, giving ``2(j + m) - v_p(2!)``, and ``v_p(2!)`` is where the two
+primes differ: 1 at ``p = 2``, 0 for odd ``p``.  Dividing out the linear
+coefficient ``p^(j+m)`` leaves
 
-    chi(p^j u)  =  1  +  p^(j+m) u  +  O(p^(2(j+m) - 1/(p-1)))
+    (chi(p^j u) - 1) / p^(j+m)  =  u  +  O(p^((j+m) - v_p(2!)))
 
-and dividing out the linear coefficient leaves ``u`` plus an error whose
-valuation grows with ``j``:
+i.e. an error of valuation ``j + m - 1`` at ``p = 2`` and ``j + m`` for odd
+``p``.  Terms with ``e >= 3`` are not binding: the same bound gives
+``(e-1)[(j+m) - 1/(p-1)]``, increasing in ``e``.
 
-    (chi(p^j u) - 1) / p^(j+m)  =  u  +  O(p^(j+m-1/(p-1)))
-
-Setting ``F = j + m`` and ``j = E - 1`` makes that error vanish modulo ``p^E``,
+Setting ``F = j + m`` and ``j = E - 1`` makes both cases exactly ``E``, so the
+error vanishes modulo ``p^E``,
 so with ``u = a + b`` the network
 
     y  =  p^-F ( chi(p^j (a+b)) - chi(0) )

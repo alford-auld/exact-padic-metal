@@ -44,22 +44,45 @@ series. The playground recovers it by finding the shortest constant-coefficient
 recurrence the exact terms admit, over `Fraction`, and then verifying the fit
 reproduces every term it was given.
 
-## Some things it finds
+## Every preset, and how deeply each was checked
 
-| preset | system | Poincaré series | dim |
-|---|---|---|---:|
-| `square` | `x²` | `(1 + t) / (1 − 2t²)` | 0.5 |
-| `cube` | `x³` | `(1 + t + 2t²) / (1 − 4t³)` | 0.67 |
-| `node` | `xy` | `(1 − t) / (1 − 4t + 4t²)` | 1 |
-| `sum2` | `x² + y²` | `1 / (1 − 2t)` | 1 |
-| `d4` | `x³ − xy²` | `(1 + t + 4t²) / (1 − 2t − 16t³ + 32t⁴)` | 1.35 |
-| `tacnode` | `y² − x⁴` | `(1 + 4t² + 8t³ − 16t⁴) / (1 − 2t − 32t⁴ + 64t⁵)` | 1.25 |
-| `whitney` | `x² − y²z` | `(1 − 8t²) / (1 − 4t − 16t² + 64t³)` | 2 |
-| `sum3` | `x² + y² + z²` | `(1 + 4t) / (1 − 8t²)` | 1.5 |
-| `cusp` | `y² − x³` | `(1 + 2t² − 64t⁶) / (1 − 2t − 128t⁶ + 256t⁷)` | 1.18 |
+From [`bench/results/m4-16gb-2026-09-28.json`](../../bench/results/m4-16gb-2026-09-28.json);
+`tests/test_docs_claims.py` fails if this table and that file disagree.
 
-The cusp needs `--upto 18`: its recurrence has order 7, and the fit demands
-enough terms to be over-determined rather than merely consistent.
+| preset | L | terms | exact | brute≤ | order | system | Poincaré series | dim |
+|---|--:|--:|--:|--:|--:|---|---|--:|
+| `cube` | 1 | 12 | 12 | 8 | 3 | `x^3` | `(1 + t + 2*t^2) / (1 - 4*t^3)` | 0.67 |
+| `square` | 1 | 12 | 12 | 8 | 2 | `x^2` | `(1 + t) / (1 - 2*t^2)` | 0.50 |
+| `cusp` | 2 | 18 | 18 | 6 | 7 | `y^2 - x^3` | `(1 + 2*t^2 - 64*t^6) / (1 - 2*t - 128*t^6 + 256*t^7)` | 1.17 |
+| `d4` | 2 | 18 | 15 | 6 | 4 | `x^3 - x*y^2` | `(1 + t + 4*t^2) / (1 - 2*t - 16*t^3 + 32*t^4)` | 1.33 |
+| `ec` | 2 | 18 | 18 | 6 | 3 | `y^2 - x^3 - x - 1` | `(1 - 2*t^2) / (1 - 2*t)` | 1.00 |
+| `line-pair` | 2 | 18 | 18 | 6 | 2 | `x*y , x + y` | `(1 + t) / (1 - 2*t^2)` | 0.50 |
+| `node` | 2 | 18 | 18 | 6 | 2 | `x*y` | `(1 - t) / (1 - 4*t + 4*t^2)` | 1.00 |
+| `pell` | 2 | 18 | 18 | 6 | 1 | `x^2 - 2*y^2` | `(1) / (1 - 2*t)` | 1.00 |
+| `sing-ec` | 2 | 18 | 18 | 6 | — | `y^2 - x^3 - x^2` | *needs more terms* | 1.16 |
+| `sum2` | 2 | 18 | 18 | 6 | 1 | `x^2 + y^2` | `(1) / (1 - 2*t)` | 1.00 |
+| `tacnode` | 2 | 18 | 16 | 6 | 5 | `y^2 - x^4` | `(1 + 4*t^2 + 8*t^3 - 16*t^4) / (1 - 2*t - 32*t^4 + 64*t^5)` | 1.25 |
+| `fermat3` | 3 | 12 | 10 | 4 | 4 | `x^3 + y^3 + z^3` | `(1 + 4*t^2 - 32*t^3) / (1 - 4*t - 64*t^3 + 256*t^4)` | 2.00 |
+| `sum3` | 3 | 12 | 12 | 4 | 2 | `x^2 + y^2 + z^2` | `(1 + 4*t) / (1 - 8*t^2)` | 1.50 |
+| `whitney` | 3 | 12 | 10 | 4 | 3 | `x^2 - y^2*z` | `(1 - 8*t^2) / (1 - 4*t - 16*t^2 + 64*t^3)` | 2.00 |
+
+The three columns that qualify the rest:
+
+- **terms** — how many `N_e` were computed.
+- **exact** — how many of them are below the survivor cap and so are *counts*
+  rather than lower bounds. **The fit uses only these.** `d4`, `tacnode`,
+  `fermat3` and `whitney` exceed the cap before the last term, so their series
+  come from a shorter prefix than the term count suggests.
+- **brute≤** — the depth to which exhaustive search over all of `(Z/2^e)^L`
+  confirmed the counts. It costs `2^(eL)`, so it necessarily differs by `L`:
+  `e ≤ 8` at one variable, `e ≤ 6` at two, `e ≤ 4` at three. "Verified against
+  exhaustive search" means *to this depth*, not to the end of the table.
+
+`cusp` needs all 18 exact terms because its recurrence has order 7, and the fit
+demands enough equations to be over-determined rather than merely consistent.
+`sing-ec` is the one preset that does not resolve at 18 terms; Igusa's theorem
+says a rational form exists, so this is a statement about the budget, not about
+the series.
 
 `dim` is `log₂` of the dominant root of the recurrence — the growth rate of
 `N_e`, i.e. the dimension of the zero locus over `Z_2`. It is read off the

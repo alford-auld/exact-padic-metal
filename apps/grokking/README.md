@@ -23,11 +23,35 @@ the §4 variable layout that is `D = 2`:
 A = [[p^j, p^j], [0, 0]]      b = [0, 0]      C = [p^-F, −p^-F]
 ```
 
-**Why.** `chi(v) = 1 + q v + q²v²/2! + …`, and the term of index `e` has
-valuation at least `(j+m)e − v_p(e!)`. So `chi(p^j u) = 1 + p^(j+m) u + O(p^(2(j+m) − 1/(p−1)))`,
-and dividing by the linear coefficient leaves `u` with an error that vanishes
-modulo `p^E` once `j ≥ E − 1`. Nothing is fitted: this is the homomorphism
-property plus Legendre's formula.
+**Why.** `chi(v) = 1 + qv + q²v²/2! + …`. Feeding it `v = p^j u`, the term of
+index `e` has valuation
+
+```
+v_p( q^e (p^j u)^e / e! )  ≥  (j+m)e − (e − s_p(e))/(p−1)      [Legendre]
+```
+
+The binding term is `e = 2`, where this is `2(j+m) − v_p(2!)` — and `v_p(2!)`
+is the place the two primes part company: it is `1` at `p = 2` and `0` for odd
+`p`. Dividing through by the linear coefficient `p^(j+m)` leaves `u` plus an
+error of valuation at least
+
+```
+(j+m) − v_p(2!)  =  j + m − 1   (p = 2, m = 2)
+                 =  j + m       (odd p, m = 1)
+```
+
+and with `j = E − 1` both are exactly `E`, so the error vanishes mod `p^E`.
+Terms with `e ≥ 3` are not binding: the same bound gives
+`(e−1)·[(j+m) − 1/(p−1)]`, which is increasing in `e` and already exceeds `E`
+at `e = 3` for both cases.
+
+Using the uniform bound `O(p^(2(j+m) − 1/(p−1)))` instead would be tight at
+`p = 2`, where `1/(p−1) = 1 = v_2(2!)`, and *loose for odd `p`*, where it
+throws away `v_p(2!) = 0` and yields only `E − 1/(p−1) < E`. The conclusion
+holds at every prime; the uniform bound only demonstrates it at the one prime
+that does not need the slack.
+
+Nothing is fitted: this is the homomorphism property plus Legendre's formula.
 
 **At the reference modulus.** `P = 113` is prime, so `p = 113`, `E = 1`,
 `j = 0`, `F = 1`:
@@ -44,13 +68,39 @@ produces, not merely a correct predictor.
 ## And a negative result: Algorithm 6 cannot find it
 
 The interesting part is what happens when you ask Algorithm 6 to *search* for
-this solution instead of being handed it. It works at `E ≤ 2` and stalls at
-`E = 3`, and the reason is structural rather than a tuning failure.
+this solution instead of being handed it. It returns a verified fit at
+`E ≤ 2` and stalls at `E = 3`, and the reason is structural rather than a
+tuning failure.
 
-`chi' = q·chi` with `q = p^m` and `m ≥ 1`. So every derivative of the residual
-with respect to an entry of `A` or `b` carries a factor of `p`, and those
-columns of the mod-`p` Jacobian are **identically zero**. Measured at `p = 2`,
-`E = 3`, with all 64 pairs as equations:
+`E ≤ 2` is not the search working. Branching is `2^7` per level at every
+level, so `|Z|` runs `1 → 128 → 16384 → cap`; `E = 1` and `E = 2` need three
+and five levels respectively and a survivor of the right coset happens to
+remain inside the cap, while `E = 3` needs seven and the cap discards the true
+solution's ancestor at level 5 (`→ 0`). Those runs are `lower_bound`, not
+`exact`; what makes their answers trustworthy is that the recovered parameter
+vector is checked directly against every pair, not that the search terminated
+cleanly.
+
+`chi' = q·chi` with `q = p^m` and `m ≥ 1`, so every derivative of the residual
+with respect to an entry of `A` or `b` carries a factor of `p`: those columns
+of the mod-`p` Jacobian are **identically zero**.
+
+What is left is sharper than "few columns survive". Since `chi` lands in
+`1 + qZ_p`, *every entry* of *every* live `C'` column is `≡ 1 mod p`. Within
+one output row the `C'` block is therefore all-ones and contributes rank
+exactly one, and distinct outputs occupy disjoint columns, so
+
+```
+rank_{F_p} J  =  M          (the number of outputs)
+```
+
+**exactly** — independent of the hidden width `D`, the input dimension `N`,
+and the sample count `|I|`. Measured across 11 instance shapes
+(`N ≤ 4`, `M ≤ 4`, `D ≤ 4`, `|I| ≤ 128`): rank equals `M` in every one, with
+only `C'` columns ever live. The width you add is exactly the width that
+cannot help.
+
+Measured at `p = 2`, `E = 3`, `M = 1`, with all 64 pairs as equations:
 
 | level | \|Z\| | equations | L | F₂ rank | branching | columns live mod 2 |
 |---:|---:|---:|---:|---:|---:|---|
@@ -58,9 +108,9 @@ columns of the mod-`p` Jacobian are **identically zero**. Measured at `p = 2`,
 | 2 | 16384 | 64 | 8 | 1 | 2⁷ | `C'[0,0]`, `C'[0,1]` |
 | 3 | 16384 | 64 | 8 | 1 | 2⁷ | `C'[0,0]`, `C'[0,1]` |
 
-Sixty-four equations in eight unknowns, and the rank is **one**. The two live
-columns are `C'[0,0]` and `C'[0,1]`, whose entries are `chi(u)` and `chi(0)` —
-both `≡ 1 mod 2`, since `chi` lands in `1 + qZ_p`. Everything else is dead.
+Sixty-four equations in eight unknowns, and the rank is **one** — which is
+`M`, as above. The two live columns are `C'[0,0]` and `C'[0,1]`, whose entries
+are `chi(u)` and `chi(0)`, both `≡ 1 mod 2`. Everything else is dead.
 
 Consequences:
 
@@ -77,11 +127,30 @@ Consequences:
   level 0, where it takes 0.03 s of a solve that then spends minutes in the
   levels above. No change to the butterfly addresses any of this.
 
-What would address it is an *implicit* representation of `Z`: the survivors at
-each level form a coset of a rank-`(L−1)` subspace whose free directions are
-always the same coordinates (`A` and `b`), so carrying `Z` as
-`explicit C' digits × affine subspace` would collapse the branching instead of
-enumerating it.
+### Two repairs, both measured, both failing
+
+**Reschedule the digits.** The `A` and `b` digits are not unconstrained, only
+constrained `m` levels later — `∂f/∂A` is divisible by `p^m`, so bumping digit
+`e` moves the residual at valuation `e+m`. Staggering the schedule so each
+variable is decided when it first bites does revive the dead columns: measured
+rank goes `1 → 3` at the Grokking shape. But branching only falls `128 → 32`,
+a factor of 4 against a gap of ~10³, and the ceiling is structural — quadrupling
+the data leaves the staggered rank at 3, and widening the network raises the
+nullity without raising the rank.
+
+**Represent `Z` instead of enumerating it.** The survivors do form a single
+coset — for the first two levels. Measured coset counts: `1, 1, ≥8, ≥256`,
+growing by at least 32× per level thereafter, at which point a coset
+representation has converged on enumeration and buys nothing. (These are sound
+lower bounds: the stabiliser estimate used is an over-estimate, so the true
+counts can only be larger.)
+
+The two failures have one cause. The survivor set is affine *exactly while the
+system is degenerate* — at low precision `chi ≡ 1 mod p`, the rank is `M`, and
+nothing is constrained, which is why everything looks linear. As soon as
+`chi`'s nonlinear terms start to bite and could constrain the parameters, the
+affine structure goes with them. Structure without constraint, or constraint
+without structure; never both.
 
 ## Running it
 

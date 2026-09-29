@@ -14,7 +14,7 @@ depends on, and the mathematical results it relies on for correctness.
 --------------------------------------------------------------------------------
 
 Tomoki Mihara, "p-adic Character Neural Network",
-arXiv:2603.29905v1 [math.NT], 31 March 2026.
+arXiv:2603.29905v1 [math.NT; cs.LG], 31 March 2026.
 https://arxiv.org/abs/2603.29905v1
 Distributed on arXiv under the arXiv.org perpetual non-exclusive license.
 
