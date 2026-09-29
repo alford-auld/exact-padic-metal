@@ -1,6 +1,6 @@
 # Deviations from the printed pseudocode
 
-Source: T. Mihara, *p-adic Character Neural Network*, [arXiv:2603.29905v1](https://arxiv.org/abs/2603.29905) [math.NT], 31 Mar 2026.
+Source: T. Mihara, *p-adic Character Neural Network*, [arXiv:2603.29905v1](https://arxiv.org/abs/2603.29905v1) [math.NT], 31 Mar 2026.
 
 Every deviation below is implemented in `padic/reference.py` with a comment at
 the site, and each is covered by a test that pins the corrected behaviour to an

@@ -1,7 +1,7 @@
 # p-adic character networks on Metal, at p = 2
 
 An implementation of T. Mihara, *p-adic Character Neural Network*
-([arXiv:2603.29905v1](https://arxiv.org/abs/2603.29905), math.NT, 31 Mar 2026)
+([arXiv:2603.29905v1](https://arxiv.org/abs/2603.29905v1), math.NT, 31 Mar 2026)
 for `p = 2`, on Apple Silicon.
 
 - **Algorithms 1–6** transcribed literally in pure Python, as the reference
@@ -174,9 +174,11 @@ Three, documented and pinned by tests in
 
 ## Licence and attribution
 
-MIT — see [`LICENSE`](LICENSE), which also records the full attribution: the
+MIT — see [`LICENSE`](LICENSE). Attribution is in [`NOTICE`](NOTICE): the
 paper implemented, the bundled kernel, dependency licences, and the
-mathematical results the code depends on for its correctness.
+mathematical results the code depends on for its correctness. The two are
+separate files because GitHub's licence detector reads `LICENSE` whole, and
+anything appended to it makes the repository read as "NOASSERTION".
 
 The Metal kernel in `vendor/yates/` is a verbatim copy of the `yates` package
 from [`exact-yates-metal`](https://github.com/alford-auld/exact-yates-metal)
