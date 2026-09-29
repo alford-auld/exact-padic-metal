@@ -7,6 +7,9 @@ Prints, in order:
   PHASE2      the §4 reduction, end to end, on planted and unfittable networks
   LEVEL0      throughput of the e = 0 step -- the NP-hard one -- vs L
   CROSSOVER   dense transform vs structural F_2 solve at e >= 1
+  BLOWUP      survivor growth, the algorithm's real limit
+  GROKKING    (a+b) mod P exactly, and why the search cannot find it
+  ZETA        Poincare series of classical singularities, all verified
   SUMMARY     one greppable block of final metrics
 
 Run with:  uv run --locked python -m bench.run
@@ -406,6 +409,58 @@ def section_grokking(have_gpu: bool) -> None:
     SUMMARY["grokking_closed_form"] = "exact for every prime tested, incl. P=113"
 
 
+# -- ZETA ------------------------------------------------------------------
+
+
+def section_zeta(have_gpu: bool) -> None:
+    rule("ZETA  (Poincare series: N_e = #{x mod 2^e : f(x) = 0})")
+    from apps.zeta.__main__ import CLOSED_FORM, PRESETS, brute_force
+    from apps.zeta.parse import parse_system
+    from apps.zeta.series import poincare
+
+    print("the survivor counts of Algorithm 6 ARE the Poincare coefficients.")
+    print("Igusa: the series is rational, so a few terms give all of it.\n")
+
+    print(f"{'preset':<11}{'system':<18}{'L':>3}{'dim':>7}  "
+          f"{'Poincare series':<46}{'brute':>7}{'closed':>8}")
+    failures = 0
+    for name in sorted(PRESETS):
+        srcs, _ = PRESETS[name]
+        polys, names = parse_system(srcs)
+        L = len(names)
+        res = poincare(polys, L, 18 if L == 2 else 12)
+        depth = min({1: 8, 2: 6, 3: 4}.get(L, 3), res.exact_upto)
+        bf = brute_force(polys, L, depth)
+        ok_bf = res.N[: depth + 1] == bf
+        ok_cf = "-"
+        if name in CLOSED_FORM:
+            want = [CLOSED_FORM[name](e) for e in range(res.exact_upto + 1)]
+            ok_cf = "OK" if want == res.N[: res.exact_upto + 1] else "FAIL"
+        rat = str(res.rational) if res.rational is not None else "(needs more terms)"
+        dim = res.dimension_estimate
+        print(f"{name:<11}{' , '.join(srcs):<18}{L:>3}"
+              f"{(f'{dim:.2f}' if dim is not None else '-'):>7}  {rat:<46}"
+              f"{('OK' if ok_bf else 'FAIL'):>7}{ok_cf:>8}")
+        failures += (not ok_bf) + (ok_cf == "FAIL")
+    if failures:
+        print(f"\n{failures} ZETA CHECK(S) FAILED")
+        sys.exit(1)
+    print("\nevery preset agrees with exhaustive search over all of (Z/2^e)^L,")
+    print("and the three with classical closed forms agree with those too.")
+
+    if have_gpu:
+        same = True
+        for name in ("node", "cusp", "whitney", "fermat3"):
+            polys, names = parse_system(PRESETS[name][0])
+            L = len(names)
+            same &= poincare(polys, L, 6, backend="dense").N == poincare(polys, L, 6).N
+        print(f"Metal vs CPU counts identical: {same}")
+        if not same:
+            sys.exit(1)
+        SUMMARY["zeta_metal_matches_cpu"] = same
+    SUMMARY["zeta_presets_verified"] = len(PRESETS)
+
+
 # -- main ------------------------------------------------------------------
 
 
@@ -418,6 +473,7 @@ def main() -> None:
     section_crossover(have_gpu)
     section_blowup(have_gpu)
     section_grokking(have_gpu)
+    section_zeta(have_gpu)
 
     rule("SUMMARY")
     SUMMARY["wall_seconds"] = round(time.perf_counter() - t0, 1)

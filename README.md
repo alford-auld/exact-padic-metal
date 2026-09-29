@@ -1,140 +1,146 @@
-# Algorithm 6 on exact subset-lattice transforms
+# p-adic character networks on Metal, at p = 2
 
-Algorithm 6 of T. Mihara, *p-adic Character Neural Network*
-([arXiv:2603.29905v1](https://arxiv.org/abs/2603.29905), math.NT, 31 Mar 2026),
-implemented at `p = 2` on the Metal Yates butterfly kernel from
-[`exact-yates-metal`](vendor/PROVENANCE.md), vendored at `vendor/yates` — plus the §4 reduction that
-produces its input from an actual 2-adic character network.
+An implementation of T. Mihara, *p-adic Character Neural Network*
+([arXiv:2603.29905v1](https://arxiv.org/abs/2603.29905), math.NT, 31 Mar 2026)
+for `p = 2`, on Apple Silicon.
 
-## Why a subset-lattice transform belongs here
+- **Algorithms 1–6** transcribed literally in pure Python, as the reference
+  every fast path is checked against.
+- **Algorithm 6** — the digit dynamic program for
+  `e_max = max{ e : f has a common zero mod p^e }` — with its inner double loop
+  collapsed onto the Metal Yates butterfly kernel.
+- **§4** — the reduction from a character network to a polynomial system.
+- Two things to play with: a **Poincaré series** explorer, and an exact
+  solution to the **Grokking** task.
 
-Algorithm 6 answers: what is the largest `e` such that a polynomial system
-`f = (f_i)_{i in I}` over `Z` has a common zero in `Z/p^e Z`? It keeps the set
-`Z` of zeros modulo `p^e`, lifts each by every digit vector
-`d in N_{<p}^L` to `w = z + p^e d`, and keeps what vanishes modulo `p^(e+1)`.
-
-At `p = 2` the digit vector `d in {0,1}^L` **is a subset** of the `L`
-coordinates. One level of the dynamic program is therefore a computation over
-the Boolean lattice `2^[L]` — the kernel's native domain. Two facts make the
-connection exact rather than decorative:
-
-**1. The lift is multilinear.** Because `d_l in {0,1}`, we have `d_l^k = d_l`
-*as integers*, so `f(z + 2^e d)` collapses to a multilinear polynomial in `d`:
-
-```
-(z_l + P d_l)^k  ==  z_l^k  +  d_l ((z_l + P)^k - z_l^k)
+```sh
+uv sync
+uv run --locked python -m pytest                     # 183 tests
+uv run --locked python -m apps.zeta --preset cusp    # play
+uv run --locked python -m bench.run                  # the full validated run
 ```
 
-and the table of all `2^L` values is the **subset zeta transform** of its
+Requires Apple Silicon and Metal for the `dense` backend; without it the
+`numpy` backend runs the same algorithm on the CPU.
+
+---
+
+## Why the kernel fits
+
+Algorithm 6 keeps the set `Z` of common zeros mod `p^e`, lifts each `z` by
+every digit vector `d ∈ N_{<p}^L` to `w = z + p^e d`, and keeps what vanishes
+mod `p^(e+1)`. At `p = 2` the digit vector `d ∈ {0,1}^L` **is a subset** of the
+`L` coordinates, so one level lives on the Boolean lattice `2^[L]`.
+
+**The lift is multilinear.** Since `d_l ∈ {0,1}`, `d_l^k = d_l` *as integers*,
+so a monomial collapses by interpolation:
+
+```
+(z_l + P·d_l)^k  =  z_l^k  +  d_l·((z_l + P)^k − z_l^k)
+```
+
+and the table of all `2^L` values is the **subset zeta transform** of the
 coefficient vector:
 
 ```
-(ZETA_SUB c)(S) = sum_{T subset S} c_T = f(z + 2^e 1_S)
+(ZETA_SUB c)(S) = Σ_{T ⊆ S} c_T = f(z + 2^e·1_S)
 ```
 
-So lines 7–12 of the pseudocode — the whole inner double loop — become one
-batched `ZETA_SUB`.
+Lines 7–12 of the pseudocode — the whole inner double loop — become one batched
+`ZETA_SUB`.
 
-**2. Wraparound costs nothing.** The kernel is exact over `Z/2^64`, and
-`Z/2^64 ->> Z/2^(e+1)` is a ring surjection for every `e+1 <= 64`, so reducing
-its output *is* the answer. `ZETA_SUB` is unipotent, so it loses no bits
-either. See [`docs/exactness.md`](docs/exactness.md).
+**Wraparound costs nothing.** The kernel is exact over `Z/2^64`, and
+`Z/2^64 ↠ Z/2^(e+1)` is a ring surjection for every `e+1 ≤ 64`, so reducing its
+output *is* the answer. `ZETA_SUB` is unipotent, so no bits are lost. See
+[`docs/exactness.md`](docs/exactness.md).
 
-## Where the transform is load-bearing, and where it is not
+## Two paths, cross-checked
 
-This is the honest version of the story, and the benchmark measures both
-halves.
+| backend | level 0 | levels ≥ 1 |
+|---|---|---|
+| `structural` *(default)* | Metal `ZETA_SUB` | `F_2` elimination |
+| `dense` | Metal `ZETA_SUB` | Metal `ZETA_SUB` |
+| `numpy` | CPU transform | CPU transform |
 
-For `e >= 1` the lift is **affine** in `d`: terms with two or more digit
-factors carry `2^(2e)`, and `2e >= e+1`. Writing `f_i(z) = 2^e c_i`, the
-surviving digits are the solutions of an affine system over `F_2`,
+For `e ≥ 1` the lift is **affine** in `d` (terms with two digit factors carry
+`2^(2e)`, and `2e ≥ e+1`), so the survivors solve an affine `F_2` system —
+`O(|I|·L²)` instead of `2^L`. Measured at `e = 2`: 3× faster at `L = 8`, 28× at
+`L = 14`, ~2700× at `L = 22`.
 
-```
-sum_l g_{i,l} d_l = c_i,     g_{i,l} = (coefficient of d_l) / 2^e
-```
+**At `e = 0` there is no shortcut and none should be expected** — it asks for
+common roots in `{0,1}^L` of multilinear polynomials over `F_2`, which is
+NP-hard. `2^L` *is* the algorithm there, and that is where the kernel earns its
+place. Measured at level 0 on an M4:
 
-which Gaussian elimination settles in `O(|I| L^2)` instead of `2^L`. Measured
-on an M4, at level `e = 2` with a square system:
+| `L` | array | `ZETA_SUB` | device copy | CPU transform |
+|----:|------:|-----------:|------------:|--------------:|
+| 18 | 8 MiB | 1.13 ms | 0.49 ms | 54.3 ms |
+| 20 | 32 MiB | 2.29 ms | 1.23 ms | 241.3 ms |
+| 24 | 512 MiB | 35.3 ms | 12.1 ms | — |
 
-| `L` | dense transform | structural `F_2` | ratio |
-|----:|----------------:|-----------------:|------:|
-|   8 |          0.4 ms |          0.13 ms |  3.3x |
-|  14 |          4.0 ms |          0.17 ms | 23x   |
-|  19 |          387 ms |          0.58 ms | 665x  |
-|  22 |         1173 ms |          0.37 ms | 3141x |
+The whole `L`-stage transform costs about three copies of the array against a
+measured 89 GB/s device copy — threadgroup tiling fuses up to 11 of the 24
+stages into one memory pass.
 
-**At `e = 0` there is no such shortcut, and none should be expected**: the step
-asks for the common roots in `{0,1}^L` of a system of multilinear polynomials
-over `F_2`, which is NP-hard. `2^L` *is* the algorithm there, and that is
-exactly where the kernel earns its place. Measured at level 0, `|I| = 4`:
+The two paths must produce identical survivor **sets** (not just counts — they
+enumerate in different orders), and the test suite and the run both check it.
 
-| `L` | array | `ZETA_SUB` | device copy | passes | CPU transform | speedup |
-|----:|------:|-----------:|------------:|-------:|--------------:|--------:|
-|  18 |  8 MiB |    1.13 ms |     0.42 ms |  2.7x |       53.1 ms |     47x |
-|  20 | 32 MiB |    2.58 ms |     1.05 ms |  2.4x |      237.6 ms |     92x |
-|  24 | 512 MiB |   33.8 ms |     11.7 ms |  2.9x |             — |       — |
+## What a result means
 
-The whole `L`-stage transform costs about **three copies of the array** —
-threadgroup tiling fuses up to 8 of the 24 stages into a single memory pass —
-against a measured device-to-device copy bandwidth of 92 GB/s on this machine.
+`solve()` returns a `guarantee`, and it is the field to read first.
 
-So the default backend, `"structural"`, uses the transform at level 0 and `F_2`
-elimination above it. `"dense"` uses the transform at every level and exists to
-cross-check the other; the two must produce identical survivor *sets*, and the
-test suite and the run both check that they do.
+| `guarantee` | meaning |
+|---|---|
+| `exact` | the program ran to a genuinely empty `W`; `e_max` is the true maximum |
+| `lower_bound` | it was stopped by the level bound or the survivor cap; a zero mod `2^e_max` exists, nothing is claimed above |
 
-## The real limit: `|Z|`, not the cost of a level
+Both stopping conditions can only make the answer *too small*. `max_e > 64` is
+refused rather than silently approximated. Details in
+[`docs/exactness.md`](docs/exactness.md).
 
-Each surviving `z` lifts to up to `2^(L - rank)` successors, so an
-under-determined system multiplies `|Z|` at every level. Measured growth:
+---
 
-```
- L  |I|   |Z_e| by level
- 8    2   64 -> 4096 -> 262144 -> 4194304 (capped)
- 8    8   24 -> 128 -> 384 -> 768 -> 2048 -> 2048
-12   12   32 -> 64 -> 128 -> 256 -> 512 -> 1024
-```
+## Play: Poincaré series
 
-This is inherent to Algorithm 6 as written, not to this implementation. A
-`max_survivors` cap keeps it bounded, and a capped run reports
-`guarantee = "lower_bound"` — a one-sided claim, since discarding survivors can
-only make `e_max` too small.
-
-## Phase 2: from a network to the system
-
-§4 reduces the character network
-
-```
-minimise || (y_i - C chi(A x_i + b))_{i in I} ||    over A, b integral, C in Q_p
+```console
+$ uv run --locked python -m apps.zeta "x*y" --verify
+Poincare series   sum_e N_e t^e  =  (1 - t) / (1 - 4*t + 4*t^2)
+recurrence        N_e = +4 N_(e-1)  -4 N_(e-2)   (order 2)
+verify  exhaustive search over (Z/2^e)^2 for e <= 7: AGREE
+verify  closed form node: N_e = (e+2)2^(e-1): AGREE
 ```
 
-to a polynomial system. Multiplying by `p^F` clears the only denominators
-(`C' = p^F C`), and `chi = exp_p(q .)` truncates to a polynomial modulo
-`p^(E+F)`, so with `L = D N + D + M D` unknowns,
+The survivor counts of Algorithm 6 **are** `N_e = #{x mod 2^e : f(x) = 0}`, the
+coefficients of the Poincaré series. Igusa proved the series is rational, so a
+few terms give all of it — the playground recovers it and checks the fit
+reproduces every term. 14 classical presets (`--list`), all verified against
+exhaustive search. See [`apps/zeta/`](apps/zeta/README.md).
+
+## Play: Grokking, exactly
+
+[`neelnanda-io/Grokking`](https://github.com/neelnanda-io/Grokking) trains a
+transformer on `(a+b) mod 113` and it groks — memorises, then much later
+generalises via a *character* algorithm. A p-adic character network has a
+character as its activation, so the solution can just be written down:
 
 ```
-f_{i,j} = p^F y_{i,j} - sum_d C'_{j,d} chi( sum_k A_{d,k} x_{i,k} + b_d )
+y = ( χ(p^j(a+b)) − χ(0) ) / p^F ,    j = E−1,  F = j+m
 ```
 
-is a polynomial over `Z`. That `A` and `b` stay integral — the point of using a
-character rather than a ball indicator — is what makes this a polynomial system
-at all.
+Two hidden units, exact on every pair, for every prime tested including
+`P = 113` (all 12769 pairs). See [`apps/grokking/`](apps/grokking/README.md).
 
-```python
-import random
-from padic import ddp
-from padic.network import planted_instance
+That app also carries a **negative result** about the paper: §4's reduction
+produces systems whose mod-`p` Jacobian has rank ≤ ~`M(N+1)` *independent of
+the sample count*, with nullity growing in the network width — because
+`χ' = qχ` with `q = p^m` makes the `A` and `b` columns vanish mod `p`. So
+Algorithm 6 branches by `p^(L−r)` per level on exactly the systems the same
+paper's reduction generates. Two repairs were measured and both fail
+(rescheduling: 4× against a ~10³× gap; coset representation: exact for two
+levels, ≥256 cosets by level four). For character networks, construction beats
+search, and that is structural rather than an engineering gap.
 
-inst, params = planted_instance(random.Random(0), n_samples=2, N=1, M=1, D=1, E=3)
-polys = inst.to_polynomial_system()
-res = ddp.solve(polys, inst.n_vars, max_e=inst.E_star)
-print(res.summary())                          # e_max >= 3  (level bound ...)
-print(inst.objective_valuation(res.e_max))    # minimum objective = |2|^3
-```
-
-`NetworkInstance.residual_valuation` re-evaluates the residual through `chi`
-itself rather than through the polynomial approximation, so it can catch an
-error in the reduction instead of repeating it.
+---
 
 ## Layout
 
@@ -145,25 +151,30 @@ padic/ddp.py         Algorithm 6: dense (transform) and structural (F_2) paths
 padic/gf2.py         affine systems over F_2
 padic/character.py   chi as a polynomial (Taylor coefficients)
 padic/network.py     the §4 reduction, and instance generators
+apps/zeta/           Poincare series playground
+apps/grokking/       exact modular addition, and the obstruction
 bench/run.py         the run command: validate, then measure
 docs/exactness.md    what a reported e_max means
 docs/deviations.md   three faults in the printed pseudocode, and the fixes
 vendor/yates/        the Metal kernel, vendored (see vendor/PROVENANCE.md)
 ```
 
-Three deviations from the paper are documented and tested — Algorithm 5 as
-printed cannot compute `a^x`, Algorithm 4's precision bound drops digits the
-answer depends on, and §4's `|p|^(e_max - 1)` needs a reading. See
-[`docs/deviations.md`](docs/deviations.md).
+## Deviations from the paper
 
-## Running it
+Three, documented and pinned by tests in
+[`docs/deviations.md`](docs/deviations.md):
 
-```sh
-uv sync
-uv run --locked python -m pytest     # 116 tests
-uv run --locked python -m bench.run  # the full run, ~80 s on an M4
-```
+1. **Algorithm 5 as printed cannot compute `a^x`** — it initialises `y ← 0`,
+   never reads `a`, and squares the exponent rather than a running base.
+2. **Algorithm 4's precision bound drops digits the answer depends on.** The
+   obvious fix — stopping once the bound hits zero — is *also* wrong, because
+   `v + me = e + s₂(e)` is not monotonic in `e`.
+3. **§4's `|p|^(e_max − 1)`** needs a reading to be consistent with Algorithm
+   6's own caption.
 
-Requires Apple Silicon and Metal for the `"dense"` backend. Without it the
-`"numpy"` backend runs the same algorithm on the CPU and the tests skip the
-GPU-specific checks.
+## Licence and provenance
+
+The Metal kernel in `vendor/yates/` is a verbatim copy of the `yates` package
+from *exact-yates-metal* (MIT), pinned in `vendor/KERNEL_COMMIT`. It is
+vendored rather than a submodule because run snapshots do not carry submodule
+contents. See [`vendor/PROVENANCE.md`](vendor/PROVENANCE.md).
