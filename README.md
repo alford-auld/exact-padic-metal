@@ -172,9 +172,17 @@ Three, documented and pinned by tests in
 3. **§4's `|p|^(e_max − 1)`** needs a reading to be consistent with Algorithm
    6's own caption.
 
-## Licence and provenance
+## Licence and attribution
+
+MIT — see [`LICENSE`](LICENSE), which also records the full attribution: the
+paper implemented, the bundled kernel, dependency licences, and the
+mathematical results the code depends on for its correctness.
 
 The Metal kernel in `vendor/yates/` is a verbatim copy of the `yates` package
-from *exact-yates-metal* (MIT), pinned in `vendor/KERNEL_COMMIT`. It is
-vendored rather than a submodule because run snapshots do not carry submodule
-contents. See [`vendor/PROVENANCE.md`](vendor/PROVENANCE.md).
+from [`exact-yates-metal`](https://github.com/alford-auld/exact-yates-metal)
+(MIT), pinned in `vendor/KERNEL_COMMIT`. It is vendored rather than a
+submodule because run snapshots do not carry submodule contents. See
+[`vendor/PROVENANCE.md`](vendor/PROVENANCE.md).
+
+`exact-yates-metal` is the kernel; this repository is an application of it
+beyond the chromatic-number app that ships there.
