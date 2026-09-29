@@ -17,6 +17,7 @@ Run with:  uv run --locked python -m bench.run
 
 from __future__ import annotations
 
+import os
 import platform
 import random
 import sys
@@ -32,6 +33,59 @@ from padic.poly import Poly, lift_coefficients
 
 SEED = 20260928
 SUMMARY: dict[str, object] = {}
+
+#: Every number the READMEs quote is collected here and written to
+#: bench/results/.  A README may only cite a committed results file, and
+#: tests/test_docs_claims.py enforces that the two agree -- so a quoted
+#: figure cannot drift away from the run that produced it.
+RESULTS: dict[str, object] = {}
+
+#: Timing protocol, recorded with the numbers so they mean something.
+LEVEL0_WARMUP_REPS = 1
+LEVEL0_REPS_SMALL = 20      # L < 20
+LEVEL0_REPS_LARGE = 5       # L >= 20
+TIMING_NOTE = (
+    "wall clock; mx.eval() forced inside every rep and mx.synchronize() "
+    "around the window, so laziness cannot collapse reps; no cooldown "
+    "between sizes, no thermal control -- these are warm back-to-back runs "
+    "on a fanless MacBook Air and should be read as such"
+)
+
+
+def write_results(path: str) -> None:
+    """Persist every collected number, with the provenance to interpret it."""
+    import json
+    import os
+    import subprocess
+
+    def git(*args: str) -> str:
+        try:
+            return subprocess.run(["git", *args], capture_output=True, text=True,
+                                  check=True).stdout.strip()
+        except Exception:
+            return "unknown"
+
+    RESULTS["schema"] = 1
+    RESULTS["run"] = {
+        "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "commit": git("rev-parse", "HEAD")[:12],
+        "dirty": bool(git("status", "--porcelain")),
+        "kernel_commit": _yates.kernel_commit(),
+        "seed": SEED,
+    }
+    RESULTS["protocol"] = {
+        "timing": TIMING_NOTE,
+        "level0_warmup_reps": LEVEL0_WARMUP_REPS,
+        "level0_reps": {"L<20": LEVEL0_REPS_SMALL, "L>=20": LEVEL0_REPS_LARGE},
+        "copy_baseline": "yates.device_copy on the same array, same protocol, "
+                         "re-measured at every footprint",
+    }
+    RESULTS["summary"] = dict(SUMMARY)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        json.dump(RESULTS, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    print(f"\nresults written to {path}")
 
 
 def rule(title: str) -> None:
@@ -73,6 +127,12 @@ def section_config() -> bool:
         if k in info:
             print(f"{k:<14} {info[k]}")
     print(f"seed           {SEED}")
+    RESULTS["host"] = {
+        "python": platform.python_version(), "machine": platform.machine(),
+        "mlx": mx.__version__, "numpy": np.__version__, "metal": have_gpu,
+        **{k: info[k] for k in ("Model Identifier", "Chip", "Memory", "macOS")
+           if k in info},
+    }
     SUMMARY["kernel_commit"] = _yates.kernel_commit()
     SUMMARY["metal"] = have_gpu
     return have_gpu
@@ -132,6 +192,9 @@ def section_validate(have_gpu: bool) -> None:
                 print(f"KERNEL MISMATCH at n={n}")
                 sys.exit(1)
         print("kernel vs cpu transform  n in {4,8,12,16}, uint64: bitwise identical")
+    RESULTS["validate"] = {"e_max_solves": checked, "backends": backends,
+                           "survivor_set_levels": setchecks,
+                           "kernel_vs_cpu_n": [4, 8, 12, 16] if have_gpu else []}
     SUMMARY["validate"] = "pass"
 
 
@@ -233,7 +296,7 @@ def section_level0(have_gpu: bool) -> None:
 
         a = mx.array(coeffs)
         mx.eval(a)
-        reps = 20 if L < 20 else 5
+        reps = LEVEL0_REPS_SMALL if L < 20 else LEVEL0_REPS_LARGE
         t_gpu = timed(lambda: yates.transform(a, "ZETA_SUB"), reps)
         t_copy = timed(lambda: yates.device_copy(a), reps)
 
@@ -248,6 +311,13 @@ def section_level0(have_gpu: bool) -> None:
               f"{t_gpu * 1e3:>10.2f}{t_copy * 1e3:>10.2f}"
               f"{t_gpu / t_copy:>9.1f}{t_cpu * 1e3:>10.1f}{speed:>9.1f}")
         results.append((L, t_build, t_gpu, t_copy, t_cpu, nbytes))
+        RESULTS.setdefault("level0", []).append({
+            "L": L, "n_polys": n_polys, "bytes": int(nbytes), "reps": reps,
+            "build_s": t_build, "zeta_s": t_gpu, "copy_s": t_copy,
+            "cpu_s": None if t_cpu != t_cpu else t_cpu,
+            "zeta_over_copy": t_gpu / t_copy,
+            "copy_gbps": (2 * nbytes) / t_copy / 1e9,
+        })
 
     big = [r for r in results if r[0] >= 18]
     copy_gbps = max((2 * r[5]) / r[3] / 1e9 for r in big)
@@ -321,6 +391,14 @@ def section_crossover(have_gpu: bool) -> None:
         ratio = t_dense / t_struct if t_dense == t_dense else float("nan")
         print(f"{L:>4}{L:>5}{Z.shape[0]:>6}{t_dense * 1e3:>11.1f}{t_struct * 1e3:>12.2f}"
               f"{ratio:>9.1f}{s.shape[0]:>11}{same:>10}")
+        RESULTS.setdefault("crossover", []).append({
+            "L": L, "n_polys": L, "n_z": int(Z.shape[0]), "level": e,
+            "dense_s": None if t_dense != t_dense else t_dense,
+            "struct_s": t_struct,
+            "ratio": None if ratio != ratio else ratio,
+            "survivors": int(s.shape[0]), "same_set": same,
+            "dense_ran_to_completion": t_dense == t_dense,
+        })
     SUMMARY["crossover"] = "structural overtakes dense as L grows, at e>=1"
 
 
@@ -340,6 +418,10 @@ def section_blowup(have_gpu: bool) -> None:
         sizes = " -> ".join(str(s.survivors_out) for s in res.levels)
         flag = "  [CAPPED]" if any(s.truncated for s in res.levels) else ""
         print(f"{L:>4}{nI:>5}   {sizes}{flag}")
+        RESULTS.setdefault("blowup", []).append({
+            "L": L, "n_polys": nI,
+            "survivors_by_level": [st.survivors_out for st in res.levels],
+            "capped": any(st.truncated for st in res.levels)})
     SUMMARY["blowup"] = "|Z| multiplies by 2^(L-rank) per level when |I| < L"
 
 
@@ -387,6 +469,11 @@ def section_grokking(have_gpu: bool) -> None:
         print("and no amount of extra data changes that (64 equations, rank 1).")
         SUMMARY["grokking_branching_per_level"] = profiles[0].branching
         SUMMARY["grokking_f2_rank"] = profiles[0].rank_max
+        RESULTS["grokking_rank_profile"] = [
+            {"level": rp.level, "survivors": rp.n_survivors,
+             "equations": rp.n_equations, "n_vars": rp.n_vars,
+             "rank": rp.rank_max, "branching": rp.branching,
+             "live_columns": rp.live_columns} for rp in profiles]
 
     # -- the search, where it still works
     print("\n-- Algorithm 6 searching for it (p = 2) --")
@@ -404,6 +491,12 @@ def section_grokking(have_gpu: bool) -> None:
             print(f"{E:>3}{task.modulus:>4}{task.D * 4:>3}{r.n_train:>7}{task.n_pairs:>5}"
                   f"{r.e_max:>4}{r.e_star_target:>8}{str(r.fitted):>8}{te:>10}{r.seconds:>8.2f}")
             reached.append((E, r.fitted, r.test_errors))
+            RESULTS.setdefault("grokking_search", []).append({
+                "E": E, "modulus": task.modulus, "n_vars": task.D * 4,
+                "n_train": r.n_train, "n_pairs": task.n_pairs,
+                "e_max": r.e_max, "target": r.e_star_target,
+                "fitted": r.fitted, "test_errors": r.test_errors,
+                "n_test": r.n_test, "seconds": r.seconds, "cap": cap})
     ok = [E for E, f, t in reached if f and t == 0]
     SUMMARY["grokking_search_exact_upto_E"] = max(ok) if ok else 0
     SUMMARY["grokking_closed_form"] = "exact for every prime tested, incl. P=113"
@@ -421,14 +514,16 @@ def section_zeta(have_gpu: bool) -> None:
     print("the survivor counts of Algorithm 6 ARE the Poincare coefficients.")
     print("Igusa: the series is rational, so a few terms give all of it.\n")
 
-    print(f"{'preset':<11}{'system':<18}{'L':>3}{'dim':>7}  "
-          f"{'Poincare series':<46}{'brute':>7}{'closed':>8}")
+    print(f"{'preset':<11}{'system':<18}{'L':>3}{'dim':>7}{'terms':>6}"
+          f"{'exact':>6}{'brute<=':>8}  {'Poincare series':<46}"
+          f"{'brute':>6}{'closed':>7}")
     failures = 0
     for name in sorted(PRESETS):
         srcs, _ = PRESETS[name]
         polys, names = parse_system(srcs)
         L = len(names)
-        res = poincare(polys, L, 18 if L == 2 else 12)
+        upto = 18 if L == 2 else 12
+        res = poincare(polys, L, upto)
         depth = min({1: 8, 2: 6, 3: 4}.get(L, 3), res.exact_upto)
         bf = brute_force(polys, L, depth)
         ok_bf = res.N[: depth + 1] == bf
@@ -439,14 +534,25 @@ def section_zeta(have_gpu: bool) -> None:
         rat = str(res.rational) if res.rational is not None else "(needs more terms)"
         dim = res.dimension_estimate
         print(f"{name:<11}{' , '.join(srcs):<18}{L:>3}"
-              f"{(f'{dim:.2f}' if dim is not None else '-'):>7}  {rat:<46}"
-              f"{('OK' if ok_bf else 'FAIL'):>7}{ok_cf:>8}")
+              f"{(f'{dim:.2f}' if dim is not None else '-'):>7}{upto:>6}"
+              f"{res.exact_upto:>6}{depth:>8}  {rat:<46}"
+              f"{('OK' if ok_bf else 'FAIL'):>6}{ok_cf:>7}")
         failures += (not ok_bf) + (ok_cf == "FAIL")
+        RESULTS.setdefault("zeta", []).append({
+            "preset": name, "system": srcs, "L": L,
+            "terms_computed": upto, "exact_upto": res.exact_upto,
+            "brute_force_depth": depth, "N": res.N,
+            "series": str(res.rational) if res.rational is not None else None,
+            "recurrence_order": len(res.recurrence) if res.recurrence else None,
+            "dimension": dim, "matches_brute_force": ok_bf,
+            "matches_closed_form": ok_cf, "seconds": res.seconds})
     if failures:
         print(f"\n{failures} ZETA CHECK(S) FAILED")
         sys.exit(1)
-    print("\nevery preset agrees with exhaustive search over all of (Z/2^e)^L,")
-    print("and the three with classical closed forms agree with those too.")
+    print("\n'exact' is how many leading N_e are below the survivor cap and so")
+    print("are counts rather than lower bounds -- the fit uses only those.")
+    print("'brute<=' is the depth exhaustive search over all of (Z/2^e)^L")
+    print("reached for that preset; it costs 2^(eL), so it differs by L.")
 
     if have_gpu:
         same = True
@@ -479,6 +585,9 @@ def main() -> None:
     SUMMARY["wall_seconds"] = round(time.perf_counter() - t0, 1)
     for k, v in SUMMARY.items():
         print(f"{k} = {v}")
+
+    out = os.environ.get("PADIC_RESULTS", "bench/results/latest.json")
+    write_results(out)
 
 
 if __name__ == "__main__":
